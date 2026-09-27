@@ -1,5 +1,9 @@
-// Export API (Phase 3: Video / Slideshow / PDF)
+// ============================================================================
+// MOCK ONLY — DELETE when Django endpoint exists. Do not add real logic here. See .agent.md task 9.
+// ============================================================================
+
 export const exportApi = {
-  triggerExport: async (projectId, exportType) => ({ jobId: 'export-job-1' }),
-  getExportStatus: async (jobId) => ({ status: 'DONE' }),
+  triggerExport: async (_projectId, _exportType) => ({ jobId: 'mock-export-job-fixture' }),
+  getExportStatus: async (_jobId) => ({ status: 'DONE', downloadUrl: null }),
 };
+

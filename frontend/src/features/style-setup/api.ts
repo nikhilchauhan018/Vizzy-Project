@@ -1,3 +1,6 @@
+// ============================================================================
+// MOCK ONLY — DELETE when Django endpoint exists. Do not add real logic here. See .agent.md task 9.
+// ============================================================================
 import { ExtractBiblesResponse } from '../../types/story';
 
 export async function extractBiblesWithGemini(params: {
@@ -19,3 +22,4 @@ export async function extractBiblesWithGemini(params: {
 
   return response.json();
 }
+

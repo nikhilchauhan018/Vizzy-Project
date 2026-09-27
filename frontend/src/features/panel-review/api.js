@@ -1,5 +1,9 @@
-// Panel Review & Refinement API (Phase 2)
+// ============================================================================
+// MOCK ONLY — DELETE when Django endpoint exists. Do not add real logic here. See .agent.md task 9.
+// ============================================================================
+
 export const panelReviewApi = {
-  selectCandidate: async (candidateId) => ({ selected: true }),
-  requestRefinement: async (versionId, instructions) => ({ status: 'queued' }),
+  selectCandidate: async (_candidateId) => ({ selected: true, versionId: 'mock-version-fixture' }),
+  requestRefinement: async (_versionId, _instructions) => ({ status: 'queued', jobId: 'mock-job-fixture' }),
 };
+
