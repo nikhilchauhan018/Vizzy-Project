@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from apps.stories.models import Project, StyleBible, Character, Environment
+from apps.stories.models import Project, StyleBible, Character, Environment, ChatMessage
 
 User = get_user_model()
 
@@ -346,3 +346,120 @@ class StoryEngineAPITests(TestCase):
         res = self.client.post(url, data, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res.data['genre'], 'Cyberpunk')
+
+    # 21. Authenticated user can create own message
+    def test_create_chat_message(self):
+        url = f'/api/stories/projects/{self.project1.id}/messages/'
+        data = {
+            'sender': 'user',
+            'content': 'Generate panel 1 with high contrast',
+            'page_id': 'p-1',
+            'message_type': 'text',
+            'payload': {'action': 'generate'},
+        }
+        res = self.client.post(url, data, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['sender'], 'user')
+        self.assertEqual(res.data['content'], 'Generate panel 1 with high contrast')
+        self.assertEqual(res.data['page_id'], 'p-1')
+        self.assertEqual(res.data['payload'], {'action': 'generate'})
+        self.assertEqual(str(res.data['project']), str(self.project1.id))
+        self.assertTrue('id' in res.data)
+        self.assertTrue('created_at' in res.data)
+
+    # 22. Authenticated user can list own messages in chronological order
+    def test_list_messages_chronological_order(self):
+        msg1 = ChatMessage.objects.create(
+            project=self.project1,
+            sender='user',
+            content='First message',
+            page_id='p-1',
+        )
+        msg2 = ChatMessage.objects.create(
+            project=self.project1,
+            sender='vizzy',
+            content='Second message',
+            page_id='p-1',
+        )
+        url = f'/api/stories/projects/{self.project1.id}/messages/'
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 2)
+        self.assertEqual(res.data[0]['id'], str(msg1.id))
+        self.assertEqual(res.data[1]['id'], str(msg2.id))
+
+    # 23. Unauthenticated chat request rejected
+    def test_unauthenticated_chat_rejected(self):
+        self.client.force_authenticate(user=None)
+        url = f'/api/stories/projects/{self.project1.id}/messages/'
+        self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(
+            self.client.post(url, {'content': 'Hello'}, format='json').status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # 24. Cross-user message list rejected (404)
+    def test_cross_user_message_list_rejected(self):
+        ChatMessage.objects.create(
+            project=self.project2,
+            sender='user',
+            content='User 2 secret prompt',
+        )
+        url = f'/api/stories/projects/{self.project2.id}/messages/'
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    # 25. Cross-user message creation rejected (404)
+    def test_cross_user_message_creation_rejected(self):
+        url = f'/api/stories/projects/{self.project2.id}/messages/'
+        data = {
+            'sender': 'user',
+            'content': 'Attempt injection into project 2',
+        }
+        res = self.client.post(url, data, format='json')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    # 26. Invalid message data rejected (empty content, invalid sender)
+    def test_invalid_message_data_rejected(self):
+        url = f'/api/stories/projects/{self.project1.id}/messages/'
+        # Empty content
+        res1 = self.client.post(url, {'sender': 'user', 'content': '   '}, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_400_BAD_REQUEST)
+        # Invalid sender choice
+        res2 = self.client.post(url, {'sender': 'invalid_actor', 'content': 'Test'}, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # 27. Client cannot spoof project ownership or created_at
+    def test_client_cannot_override_project_or_created_at(self):
+        url = f'/api/stories/projects/{self.project1.id}/messages/'
+        data = {
+            'project': str(self.project2.id),
+            'sender': 'user',
+            'content': 'Testing read-only fields',
+            'created_at': '2020-01-01T00:00:00Z',
+        }
+        res = self.client.post(url, data, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(str(res.data['project']), str(self.project1.id))
+        self.assertNotEqual(res.data['created_at'], '2020-01-01T00:00:00Z')
+
+    # 28. Message page_id filtering works
+    def test_message_page_id_filtering(self):
+        ChatMessage.objects.create(
+            project=self.project1,
+            sender='user',
+            content='Page 1 prompt',
+            page_id='p-1',
+        )
+        ChatMessage.objects.create(
+            project=self.project1,
+            sender='user',
+            content='Page 2 prompt',
+            page_id='p-2',
+        )
+        url = f'/api/stories/projects/{self.project1.id}/messages/?page_id=p-1'
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['content'], 'Page 1 prompt')
+

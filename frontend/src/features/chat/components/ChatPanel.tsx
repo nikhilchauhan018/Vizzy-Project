@@ -14,6 +14,7 @@ interface ChatPanelProps {
   selectedCandidateId?: string;
   isPageApproved?: boolean;
   isLoading?: boolean;
+  apiError?: string | null;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -27,6 +28,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   selectedCandidateId,
   isPageApproved,
   isLoading,
+  apiError,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -39,6 +41,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       {/* Scrollable conversation thread */}
       <div className="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 py-4 sm:py-6 space-y-4 custom-scrollbar">
         <div className="max-w-3xl mx-auto w-full space-y-4">
+          {/* API Error Notification */}
+          {apiError && (
+            <div className="bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5 text-xs text-rose-700 flex items-center justify-between">
+              <span>{apiError}</span>
+            </div>
+          )}
+
           {messages.map((msg) => (
             <ChatMessage
               key={msg.id}

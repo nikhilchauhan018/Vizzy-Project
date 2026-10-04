@@ -19,9 +19,11 @@ export default function App() {
     activeProject,
     activeProjectId,
     setActiveProjectId,
+    sendChatMessage,
     updateProject,
     createNewProject,
     resetToPresets,
+    apiError,
   } = useStoryEngine();
 
   // Navigation & Drawer States
@@ -86,143 +88,21 @@ export default function App() {
     setIsPreviewOpen(false);
   };
 
-  // 1. Send Message / Prompt Refinement Flow
-  const handleSendMessage = (text: string, attachedImage?: string | null) => {
-    const userMsg: ChatMessageItem = {
-      id: `msg-${Date.now()}`,
-      sender: 'user',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      pageId: currentPage.id,
-      type: 'text',
-    };
-
-    const updatedHistory = [...projectChatHistory, userMsg];
-    updateProject({ chatHistory: updatedHistory });
+  // 1. Send Message Flow (Persisted directly through backend API)
+  const handleSendMessage = async (text: string, _attachedImage?: string | null) => {
+    if (!text || !text.trim()) return;
     setIsGenerating(true);
-
-    // Asynchronous simulated candidate generation / refinement
-    setTimeout(() => {
-      const isRefine = Boolean(currentPage.currentImage);
-      const newPalette = activeProject.styleBible.palette;
-
-      if (isRefine) {
-        // Refinement: creates a new version
-        const refinedArt = createGraphicNovelArt({
-          title: `${currentPage.title} (Refined)`,
-          theme: activeProject.historically_grounded ? 'war' : 'cyberpunk',
-          palette: newPalette,
-          mood: text.toLowerCase().includes('dark') ? 'dark' : 'cinematic',
-          shotType: text.toLowerCase().includes('close') ? 'close' : 'medium',
-        });
-
-        const newVersion = {
-          id: `v-${Date.now()}`,
-          versionNumber: (currentPage.versions?.length || 0) + 1,
-          prompt: text,
-          refinementNote: text,
-          imageUrl: refinedArt,
-          created_at: new Date().toISOString(),
-        };
-
-        const updatedPage: StoryPage = {
-          ...currentPage,
-          currentImage: refinedArt,
-          status: 'APPROVED',
-          versions: [...(currentPage.versions || []), newVersion],
-        };
-
-        const vizzyReply: ChatMessageItem = {
-          id: `msg-${Date.now() + 1}`,
-          sender: 'vizzy',
-          text: `I refined the scene based on your instruction: "${text}". Here is the updated artwork:`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          pageId: currentPage.id,
-          type: 'approval',
-          refinedImageUrl: refinedArt,
-        };
-
-        updateProject({
-          pages: projectPages.map((p) => (p.id === currentPage.id ? updatedPage : p)),
-          chatHistory: [...updatedHistory, vizzyReply],
-        });
-      } else {
-        // Initial Generation: creates 3 distinct visual candidates
-        const c1 = createGraphicNovelArt({
-          title: `${currentPage.title} Option 1`,
-          theme: 'war',
-          shotType: 'wide',
-          palette: newPalette,
-        });
-        const c2 = createGraphicNovelArt({
-          title: `${currentPage.title} Option 2`,
-          theme: 'war',
-          shotType: 'medium',
-          palette: newPalette,
-        });
-        const c3 = createGraphicNovelArt({
-          title: `${currentPage.title} Option 3`,
-          theme: 'war',
-          shotType: 'close',
-          palette: newPalette,
-        });
-
-        const candidates: GenerationCandidate[] = [
-          {
-            id: `cand-${Date.now()}-1`,
-            title: 'Option 1: Wide Angle',
-            description: 'Establishing wide perspective with atmospheric lighting',
-            imageUrl: c1,
-            camera: 'Wide Angle',
-            lighting: 'Chiaroscuro',
-            aspectRatio: '16:9',
-          },
-          {
-            id: `cand-${Date.now()}-2`,
-            title: 'Option 2: Medium Focus',
-            description: 'Dynamic medium shot highlighting squad interaction',
-            imageUrl: c2,
-            camera: 'Medium Shot',
-            lighting: 'Rim Light',
-            aspectRatio: '16:9',
-          },
-          {
-            id: `cand-${Date.now()}-3`,
-            title: 'Option 3: Close Focus',
-            description: 'Intense close-up capturing tactical determination',
-            imageUrl: c3,
-            camera: 'Close-Up',
-            lighting: 'High Contrast',
-            aspectRatio: '16:9',
-          },
-        ];
-
-        const updatedPage: StoryPage = {
-          ...currentPage,
-          candidates,
-          selectedCandidateId: candidates[0].id,
-          currentImage: candidates[0].imageUrl,
-          status: 'OPTIONS_READY',
-        };
-
-        const vizzyReply: ChatMessageItem = {
-          id: `msg-${Date.now() + 1}`,
-          sender: 'vizzy',
-          text: `I generated 3 visual directions for Page ${currentPage.pageNumber}. Select your preferred option or ask for refinements:`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          pageId: currentPage.id,
-          type: 'options',
-          candidates,
-        };
-
-        updateProject({
-          pages: projectPages.map((p) => (p.id === currentPage.id ? updatedPage : p)),
-          chatHistory: [...updatedHistory, vizzyReply],
-        });
-      }
-
+    try {
+      await sendChatMessage(text, {
+        pageId: currentPage.id,
+        sender: 'user',
+        messageType: 'text',
+      });
+    } catch (err) {
+      console.error('Failed to persist user chat message:', err);
+    } finally {
       setIsGenerating(false);
-    }, 1200);
+    }
   };
 
   // 2. Candidate Selection Action
@@ -431,6 +311,7 @@ export default function App() {
             selectedCandidateId={currentPage.selectedCandidateId}
             isPageApproved={currentPage.status === 'APPROVED'}
             isLoading={isGenerating}
+            apiError={apiError}
           />
         )}
       </div>

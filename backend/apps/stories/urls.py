@@ -4,6 +4,7 @@ from .views import (
     StyleBibleViewSet,
     CharacterViewSet,
     EnvironmentViewSet,
+    ChatMessageViewSet,
 )
 
 # Project endpoints
@@ -51,6 +52,12 @@ environment_detail = EnvironmentViewSet.as_view({
     'delete': 'destroy',
 })
 
+# Chat Messages endpoints (nested under Project)
+chat_message_list = ChatMessageViewSet.as_view({
+    'get': 'list',
+    'post': 'create',
+})
+
 urlpatterns = [
     # Projects
     path('projects/', project_list, name='project-list'),
@@ -66,4 +73,7 @@ urlpatterns = [
     # Environments
     path('projects/<uuid:project_pk>/environments/', environment_list, name='project-environment-list'),
     path('projects/<uuid:project_pk>/environments/<uuid:pk>/', environment_detail, name='project-environment-detail'),
+
+    # Chat Messages
+    path('projects/<uuid:project_pk>/messages/', chat_message_list, name='project-message-list'),
 ]

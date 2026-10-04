@@ -45,6 +45,17 @@ export interface BackendEnvironment {
   updated_at?: string;
 }
 
+export interface BackendChatMessage {
+  id: string;
+  project: string;
+  page_id?: string | null;
+  sender: 'user' | 'vizzy' | 'system';
+  message_type: string;
+  content: string;
+  payload: Record<string, any>;
+  created_at: string;
+}
+
 export interface BackendProject {
   id: string;
   owner?: string;
@@ -265,5 +276,37 @@ export const storiesApi = {
       }
     );
     return handleResponse<void>(res);
+  },
+
+  // Chat message endpoints
+  async getProjectMessages(
+    projectId: string,
+    pageId?: string
+  ): Promise<BackendChatMessage[]> {
+    const url = pageId
+      ? `${BASE_URL}/projects/${projectId}/messages/?page_id=${encodeURIComponent(pageId)}`
+      : `${BASE_URL}/projects/${projectId}/messages/`;
+    const res = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+    return handleResponse<BackendChatMessage[]>(res);
+  },
+
+  async createProjectMessage(
+    projectId: string,
+    message: {
+      sender: 'user' | 'vizzy' | 'system';
+      content: string;
+      page_id?: string | null;
+      message_type?: string;
+      payload?: Record<string, any>;
+    }
+  ): Promise<BackendChatMessage> {
+    const res = await fetch(`${BASE_URL}/projects/${projectId}/messages/`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(message),
+    });
+    return handleResponse<BackendChatMessage>(res);
   },
 };
