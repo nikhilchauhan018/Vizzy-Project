@@ -16,7 +16,6 @@ class AccountsAuthTests(APITestCase):
             'password': 'SecurePassword123!',
         }
         self.existing_user = User.objects.create_user(
-            username=self.user_data['email'],
             email=self.user_data['email'],
             password=self.user_data['password'],
             first_name='Auth',
@@ -148,7 +147,6 @@ class AccountsAuthTests(APITestCase):
             story_notes="Restricted"
         )
         user_b = User.objects.create_user(
-            username='user_b@vizzy.studio',
             email='user_b@vizzy.studio',
             password='UserBPassword123!',
             first_name='User',

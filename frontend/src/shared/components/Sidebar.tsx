@@ -8,6 +8,8 @@ interface SidebarProps {
   onSelectProject: (projectId: string) => void;
   onNewChat: () => void;
   onOpenAccount: () => void;
+  fullName?: string;
+  userEmail?: string;
   userName?: string;
   userPlan?: string;
 }
@@ -18,9 +20,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectProject,
   onNewChat,
   onOpenAccount,
-  userName = 'Nikhil Kumar',
+  fullName,
+  userEmail,
+  userName,
   userPlan = 'Go Plan',
 }) => {
+  const displayName = fullName || userName || 'Artist';
   const [showAllChats, setShowAllChats] = useState(false);
 
   const displayedProjects = showAllChats ? projects : projects.slice(0, 8);
@@ -96,11 +101,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <div className="flex items-center gap-2.5 truncate">
             <div className="w-7 h-7 rounded-full bg-[#F5F5F4] border border-[#E7E7E5] flex items-center justify-center font-bold text-xs text-[#171717] shrink-0">
-              {userName.charAt(0)}
+              {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="truncate">
-              <div className="text-xs font-semibold text-[#171717] truncate">{userName}</div>
-              <div className="text-[10px] text-[#9CA3AF] truncate">{userPlan}</div>
+              <div className="text-xs font-semibold text-[#171717] truncate">{displayName}</div>
+              <div className="text-[10px] text-[#9CA3AF] truncate">{userEmail || userPlan}</div>
             </div>
           </div>
           <ChevronRight className="w-3.5 h-3.5 text-[#9CA3AF] shrink-0" />

@@ -1,0 +1,6 @@
+{
+  "name": "Vizzy - Graphic Novel & Storyboard Studio",
+  "description": "AI-powered graphic novel, comic, and storyboard studio with three-engine architecture: Story Bible, Visual Generation with failover, and Canvas Composition.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

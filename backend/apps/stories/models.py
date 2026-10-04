@@ -12,6 +12,7 @@ class Project(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='projects', null=True, blank=True)
     title = models.CharField(max_length=255)
     story_notes = models.TextField(blank=True, default='')
+    genre = models.CharField(max_length=100, blank=True, default='Graphic Novel')
     historically_grounded = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SETUP')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -42,6 +43,7 @@ class Character(models.Model):
     uniform = models.TextField()
     hair = models.TextField()
     reference_image_url = models.CharField(max_length=1024, null=True, blank=True)
+    avatar_color = models.CharField(max_length=50, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

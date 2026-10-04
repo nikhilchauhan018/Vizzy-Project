@@ -24,6 +24,7 @@ style_bible_detail = StyleBibleViewSet.as_view({
     'post': 'create',
     'put': 'update',
     'patch': 'partial_update',
+    'delete': 'destroy',
 })
 
 # Character endpoints (nested under Project)

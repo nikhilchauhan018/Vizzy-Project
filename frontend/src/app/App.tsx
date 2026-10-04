@@ -379,6 +379,8 @@ export default function App() {
           onSelectProject={handleSelectProject}
           onNewChat={handleNewChat}
           onOpenAccount={() => setIsAccountOpen(true)}
+          fullName={userDisplayName}
+          userEmail={userEmail}
           userName={userDisplayName}
           userPlan="Go Plan"
         />
@@ -460,6 +462,8 @@ export default function App() {
             setIsMobileMenuOpen(false);
             setIsAccountOpen(true);
           }}
+          fullName={userDisplayName}
+          userEmail={userEmail}
           userName={userDisplayName}
           userPlan="Go Plan"
         />
@@ -481,6 +485,7 @@ export default function App() {
       <AccountModal
         isOpen={isAccountOpen}
         onClose={() => setIsAccountOpen(false)}
+        fullName={userDisplayName}
         userName={userDisplayName}
         userEmail={userEmail}
         onSignOut={logout}

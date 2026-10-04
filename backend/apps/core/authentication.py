@@ -31,9 +31,10 @@ class DevelopmentAuthentication(authentication.BaseAuthentication):
             return None
 
         user, _ = User.objects.get_or_create(
-            username='dev_user',
+            email='developer@vizzy.studio',
             defaults={
-                'email': 'developer@vizzy.studio',
+                'first_name': 'Vizzy',
+                'last_name': 'Developer',
                 'is_active': True,
             },
         )
