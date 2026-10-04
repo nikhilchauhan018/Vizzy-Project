@@ -1,81 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Project, StyleBible, Character, Environment } from '../../../types/story';
 import { PRESET_PROJECTS } from '../data/presets';
+import { storiesApi } from '../../../services/storiesApi';
 import {
-  storiesApi,
-  BackendProject,
-} from '../../../services/storiesApi';
+  mapBackendToProject,
+  mapBackendStyleBible,
+  mapBackendCharacter,
+  mapBackendEnvironment,
+} from '../services/storyMapper';
 
-// ONLY store non-authoritative UI session pointers in localStorage
+// ONLY store non-authoritative UI session pointer (active project ID) in localStorage
 const ACTIVE_ID_KEY = 'vizzy_ui_active_project_id';
-
-/**
- * Transforms backend Django model response into the frontend Project interface.
- * Preserves existing Page/Panel UI states until dedicated Page/Panel step.
- */
-function mapBackendToProject(
-  bp: BackendProject,
-  cachedExtras?: Partial<Project>
-): Project {
-  const sb = bp.style_bible;
-  const mappedStyleBible: StyleBible = {
-    id: sb?.id || `sb-${bp.id}`,
-    projectId: bp.id,
-    art_style: sb?.art_style || 'Cinematic graphic novel',
-    palette: Array.isArray(sb?.palette) && sb.palette.length > 0
-      ? sb.palette
-      : ['#1C242C', '#39464E', '#66757F', '#B45309', '#F1ECE1'],
-    lighting_default: sb?.lighting_default || 'High contrast chiaroscuro',
-    aspect_ratio: (sb?.aspect_ratio as any) || '16:9',
-    render_medium: sb?.render_medium || 'Digital graphic novel inking',
-    locked_style_prompt_prefix: sb?.locked_style_prompt_prefix || 'Graphic novel illustration',
-    created_at: sb?.created_at || bp.created_at,
-    updated_at: sb?.updated_at || bp.updated_at,
-  };
-
-  const mappedCharacters: Character[] = (bp.characters || []).map((c) => ({
-    id: c.id,
-    projectId: bp.id,
-    name: c.name,
-    role: c.role || '',
-    age: c.age || '',
-    appearance: c.appearance || '',
-    uniform: c.uniform || '',
-    hair: c.hair || '',
-    reference_image_url: c.reference_image_url || undefined,
-    created_at: c.created_at || bp.created_at,
-    updated_at: c.updated_at || bp.updated_at,
-  }));
-
-  const mappedEnvironments: Environment[] = (bp.environments || []).map((e) => ({
-    id: e.id,
-    projectId: bp.id,
-    name: e.name,
-    description: e.description || '',
-    weather: e.weather || '',
-    time_of_day: e.time_of_day || '',
-    reference_image_url: e.reference_image_url || undefined,
-    created_at: e.created_at || bp.created_at,
-    updated_at: e.updated_at || bp.updated_at,
-  }));
-
-  return {
-    id: bp.id,
-    title: bp.title || 'Untitled Story',
-    story_notes: bp.story_notes || '',
-    genre: cachedExtras?.genre || 'Graphic Novel',
-    historically_grounded: bp.historically_grounded ?? false,
-    status: bp.status || 'IN_PROGRESS',
-    styleBible: mappedStyleBible,
-    characters: mappedCharacters,
-    environments: mappedEnvironments,
-    pages: cachedExtras?.pages || PRESET_PROJECTS[0]?.pages || [],
-    chatHistory: cachedExtras?.chatHistory || PRESET_PROJECTS[0]?.chatHistory || [],
-    uploadedReferenceImage: cachedExtras?.uploadedReferenceImage || null,
-    created_at: bp.created_at,
-    updated_at: bp.updated_at,
-  };
-}
 
 export function useStoryEngine() {
   const [projects, setProjects] = useState<Project[]>(PRESET_PROJECTS);
@@ -90,14 +25,14 @@ export function useStoryEngine() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // In-memory UI cache for transient page/panel and chat states during Step 3
+  // In-memory UI cache for transient page/panel and chat states during conversation
   const uiExtrasCache = useRef<Record<string, Partial<Project>>>({});
 
   // Sync active project ID to localStorage UI session pointer only
   useEffect(() => {
     try {
       localStorage.setItem(ACTIVE_ID_KEY, activeProjectId);
-    } catch (e) {
+    } catch {
       // Ignore localStorage write failure in restrictive environments
     }
   }, [activeProjectId]);
@@ -130,7 +65,7 @@ export function useStoryEngine() {
           setActiveProjectId(hydrated[0].id);
         }
       } else {
-        // Seed default initial project into Django backend if database is empty
+        // Seed default initial project into Django backend if database is empty for this user
         try {
           const seeded = await storiesApi.createProject({
             title: PRESET_PROJECTS[0].title,
@@ -195,17 +130,15 @@ export function useStoryEngine() {
     loadProjects();
   }, [loadProjects]);
 
-  const rawActive =
+  const activeProject =
     projects.find((p) => p.id === activeProjectId) || projects[0] || PRESET_PROJECTS[0];
 
-  const activeProject = rawActive;
-
-  // 1. Update Project (Snapshot rollback on failure)
+  // 1. Update Project (Authoritative server update with rollback on failure)
   const updateProject = async (updates: Partial<Project>) => {
     const previousProjects = projects;
     setApiError(null);
 
-    // Cache transient UI extras in memory
+    // Cache transient in-memory UI extras (chat, pages, reference)
     uiExtrasCache.current[activeProject.id] = {
       ...(uiExtrasCache.current[activeProject.id] || {}),
       chatHistory: updates.chatHistory ?? activeProject.chatHistory,
@@ -231,12 +164,28 @@ export function useStoryEngine() {
         if (updates.historically_grounded !== undefined)
           backendPayload.historically_grounded = updates.historically_grounded;
         if (updates.status !== undefined) backendPayload.status = updates.status;
+        if (updates.genre !== undefined) backendPayload.genre = updates.genre;
 
         if (Object.keys(backendPayload).length > 0) {
-          await storiesApi.updateProject(activeProject.id, backendPayload);
+          const confirmed = await storiesApi.updateProject(activeProject.id, backendPayload);
+          // Confirm state with authoritative server response
+          setProjects((prev) =>
+            prev.map((p) =>
+              p.id === activeProject.id
+                ? {
+                    ...p,
+                    title: confirmed.title,
+                    story_notes: confirmed.story_notes || '',
+                    historically_grounded: confirmed.historically_grounded ?? false,
+                    status: confirmed.status,
+                    genre: (confirmed as any).genre || p.genre,
+                    updated_at: confirmed.updated_at,
+                  }
+                : p
+            )
+          );
         }
       } catch (err: any) {
-        // Immediate rollback to snapshot
         setProjects(previousProjects);
         const msg = err.message || 'Failed to update project';
         setApiError(msg);
@@ -245,12 +194,37 @@ export function useStoryEngine() {
     }
   };
 
-  // 2. Update StyleBible (Snapshot rollback on failure)
+  // 2. Delete Project (Authoritative server delete with rollback on failure)
+  const deleteProject = async (projectId: string) => {
+    const previousProjects = projects;
+    const previousActiveId = activeProjectId;
+    setApiError(null);
+
+    const remaining = projects.filter((p) => p.id !== projectId);
+    setProjects(remaining);
+
+    if (activeProjectId === projectId) {
+      setActiveProjectId(remaining[0]?.id || '');
+    }
+
+    if (!projectId.startsWith('preset-')) {
+      try {
+        await storiesApi.deleteProject(projectId);
+      } catch (err: any) {
+        setProjects(previousProjects);
+        setActiveProjectId(previousActiveId);
+        const msg = err.message || 'Failed to delete project';
+        setApiError(msg);
+        throw err;
+      }
+    }
+  };
+
+  // 3. Update StyleBible (Authoritative server update with rollback on failure)
   const updateStyleBible = async (updates: Partial<StyleBible>) => {
     const previousProjects = projects;
     setApiError(null);
 
-    // Optimistic UI update
     setProjects((prev) =>
       prev.map((p) =>
         p.id === activeProject.id
@@ -269,7 +243,7 @@ export function useStoryEngine() {
 
     if (!activeProject.id.startsWith('preset-')) {
       try {
-        await storiesApi.createOrUpdateStyleBible(activeProject.id, {
+        const confirmed = await storiesApi.createOrUpdateStyleBible(activeProject.id, {
           art_style: updates.art_style,
           palette: updates.palette,
           lighting_default: updates.lighting_default,
@@ -277,8 +251,20 @@ export function useStoryEngine() {
           render_medium: updates.render_medium,
           locked_style_prompt_prefix: updates.locked_style_prompt_prefix,
         });
+
+        // Sync state from server-confirmed StyleBible
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === activeProject.id
+              ? {
+                  ...p,
+                  styleBible: mapBackendStyleBible(confirmed, activeProject.id),
+                  updated_at: confirmed.updated_at || new Date().toISOString(),
+                }
+              : p
+          )
+        );
       } catch (err: any) {
-        // Immediate rollback to snapshot
         setProjects(previousProjects);
         const msg = err.message || 'Failed to update StyleBible';
         setApiError(msg);
@@ -287,8 +273,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 3. Character CRUD
-  // 3a. Add Character (Server-confirmed: UI only appends after backend confirms)
+  // 4. Character CRUD (Server-confirmed updates and rollbacks)
   const addCharacter = async (
     characterData: Omit<Character, 'id' | 'projectId' | 'created_at' | 'updated_at'>
   ) => {
@@ -322,19 +307,7 @@ export function useStoryEngine() {
         reference_image_url: characterData.reference_image_url,
       });
 
-      const confirmedChar: Character = {
-        id: backendChar.id,
-        projectId: activeProject.id,
-        name: backendChar.name,
-        role: backendChar.role || '',
-        age: backendChar.age || '',
-        appearance: backendChar.appearance || '',
-        uniform: backendChar.uniform || '',
-        hair: backendChar.hair || '',
-        reference_image_url: backendChar.reference_image_url || undefined,
-        created_at: backendChar.created_at || new Date().toISOString(),
-        updated_at: backendChar.updated_at || new Date().toISOString(),
-      };
+      const confirmedChar = mapBackendCharacter(backendChar, activeProject.id);
 
       setProjects((prev) =>
         prev.map((p) =>
@@ -351,7 +324,6 @@ export function useStoryEngine() {
     }
   };
 
-  // 3b. Update Character (Snapshot rollback on failure)
   const updateCharacter = async (characterId: string, updates: Partial<Character>) => {
     const previousProjects = projects;
     setApiError(null);
@@ -374,7 +346,7 @@ export function useStoryEngine() {
 
     if (!activeProject.id.startsWith('preset-')) {
       try {
-        await storiesApi.updateCharacter(activeProject.id, characterId, {
+        const confirmed = await storiesApi.updateCharacter(activeProject.id, characterId, {
           name: updates.name,
           role: updates.role,
           age: updates.age,
@@ -383,6 +355,19 @@ export function useStoryEngine() {
           hair: updates.hair,
           reference_image_url: updates.reference_image_url,
         });
+
+        const mapped = mapBackendCharacter(confirmed, activeProject.id);
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === activeProject.id
+              ? {
+                  ...p,
+                  characters: p.characters.map((c) => (c.id === characterId ? mapped : c)),
+                  updated_at: new Date().toISOString(),
+                }
+              : p
+          )
+        );
       } catch (err: any) {
         setProjects(previousProjects);
         const msg = err.message || 'Failed to update character';
@@ -392,7 +377,6 @@ export function useStoryEngine() {
     }
   };
 
-  // 3c. Delete Character (Snapshot rollback on failure)
   const deleteCharacter = async (characterId: string) => {
     const previousProjects = projects;
     setApiError(null);
@@ -421,8 +405,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 4. Environment CRUD
-  // 4a. Add Environment (Server-confirmed: UI only appends after backend confirms)
+  // 5. Environment CRUD (Server-confirmed updates and rollbacks)
   const addEnvironment = async (
     envData: Omit<Environment, 'id' | 'projectId' | 'created_at' | 'updated_at'>
   ) => {
@@ -454,17 +437,7 @@ export function useStoryEngine() {
         reference_image_url: envData.reference_image_url,
       });
 
-      const confirmedEnv: Environment = {
-        id: backendEnv.id,
-        projectId: activeProject.id,
-        name: backendEnv.name,
-        description: backendEnv.description || '',
-        weather: backendEnv.weather || '',
-        time_of_day: backendEnv.time_of_day || '',
-        reference_image_url: backendEnv.reference_image_url || undefined,
-        created_at: backendEnv.created_at || new Date().toISOString(),
-        updated_at: backendEnv.updated_at || new Date().toISOString(),
-      };
+      const confirmedEnv = mapBackendEnvironment(backendEnv, activeProject.id);
 
       setProjects((prev) =>
         prev.map((p) =>
@@ -481,7 +454,6 @@ export function useStoryEngine() {
     }
   };
 
-  // 4b. Update Environment (Snapshot rollback on failure)
   const updateEnvironment = async (envId: string, updates: Partial<Environment>) => {
     const previousProjects = projects;
     setApiError(null);
@@ -502,13 +474,26 @@ export function useStoryEngine() {
 
     if (!activeProject.id.startsWith('preset-')) {
       try {
-        await storiesApi.updateEnvironment(activeProject.id, envId, {
+        const confirmed = await storiesApi.updateEnvironment(activeProject.id, envId, {
           name: updates.name,
           description: updates.description,
           weather: updates.weather,
           time_of_day: updates.time_of_day,
           reference_image_url: updates.reference_image_url,
         });
+
+        const mapped = mapBackendEnvironment(confirmed, activeProject.id);
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === activeProject.id
+              ? {
+                  ...p,
+                  environments: p.environments.map((e) => (e.id === envId ? mapped : e)),
+                  updated_at: new Date().toISOString(),
+                }
+              : p
+          )
+        );
       } catch (err: any) {
         setProjects(previousProjects);
         const msg = err.message || 'Failed to update environment';
@@ -518,7 +503,6 @@ export function useStoryEngine() {
     }
   };
 
-  // 4c. Delete Environment (Snapshot rollback on failure)
   const deleteEnvironment = async (envId: string) => {
     const previousProjects = projects;
     setApiError(null);
@@ -547,7 +531,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 5. Create Project (Server-confirmed: only active upon backend persistence)
+  // 6. Create Project (Server-confirmed: initialized with StyleBible on backend)
   const createNewProject = async (title: string = 'Untitled Story') => {
     setApiError(null);
     try {
@@ -558,7 +542,7 @@ export function useStoryEngine() {
         status: 'SETUP',
       });
 
-      // Initialize StyleBible on backend
+      // Initialize default StyleBible on backend
       await storiesApi.createOrUpdateStyleBible(backendProject.id, {
         art_style: 'Modern cinematic graphic novel, crisp brush inking, atmospheric lighting',
         palette: ['#1E293B', '#3B82F6', '#8B5CF6', '#F59E0B', '#F8FAFC'],
@@ -591,6 +575,7 @@ export function useStoryEngine() {
     activeProjectId,
     setActiveProjectId,
     updateProject,
+    deleteProject,
     updateStyleBible,
     addCharacter,
     updateCharacter,

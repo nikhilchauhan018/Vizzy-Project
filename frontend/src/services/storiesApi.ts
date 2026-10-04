@@ -165,6 +165,14 @@ export const storiesApi = {
     return handleResponse<BackendStyleBible>(res);
   },
 
+  async deleteStyleBible(projectId: string): Promise<void> {
+    const res = await fetch(`${BASE_URL}/projects/${projectId}/style-bible/`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    return handleResponse<void>(res);
+  },
+
   // Character endpoints
   async listCharacters(projectId: string): Promise<BackendCharacter[]> {
     const res = await fetch(`${BASE_URL}/projects/${projectId}/characters/`, {

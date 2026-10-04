@@ -38,6 +38,7 @@ class CharacterSerializer(serializers.ModelSerializer):
             'uniform',
             'hair',
             'reference_image_url',
+            'avatar_color',
             'created_at',
             'updated_at',
         ]
@@ -75,6 +76,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             'owner',
             'title',
             'story_notes',
+            'genre',
             'historically_grounded',
             'status',
             'style_bible',

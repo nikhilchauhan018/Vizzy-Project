@@ -13,12 +13,10 @@ class StoryEngineAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user1 = User.objects.create_user(
-            username='user1',
             email='user1@example.com',
             password='password123',
         )
         self.user2 = User.objects.create_user(
-            username='user2',
             email='user2@example.com',
             password='password123',
         )
@@ -244,3 +242,107 @@ class StoryEngineAPITests(TestCase):
         url = '/api/stories/projects/'
         res = unauth_client.get(url)
         self.assertIn(res.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    # 14. User can delete their own project and cascade related items
+    def test_delete_own_project(self):
+        StyleBible.objects.create(
+            project=self.project1,
+            art_style='Noir',
+            palette=['#000000', '#FFFFFF'],
+            lighting_default='Low key',
+            locked_style_prompt_prefix='Noir style',
+        )
+        Character.objects.create(
+            project=self.project1,
+            name='Detective John',
+            appearance='Trench coat',
+            uniform='Suit',
+            hair='Slicked',
+        )
+        url = f'/api/stories/projects/{self.project1.id}/'
+        del_res = self.client.delete(url)
+        self.assertEqual(del_res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Project.objects.filter(id=self.project1.id).exists())
+        self.assertFalse(StyleBible.objects.filter(project_id=self.project1.id).exists())
+        self.assertFalse(Character.objects.filter(project_id=self.project1.id).exists())
+
+    # 15. User cannot delete another user's project
+    def test_cannot_delete_other_user_project(self):
+        url = f'/api/stories/projects/{self.project2.id}/'
+        del_res = self.client.delete(url)
+        self.assertEqual(del_res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(Project.objects.filter(id=self.project2.id).exists())
+
+    # 16. User can delete StyleBible for their project
+    def test_style_bible_delete_own_project(self):
+        sb = StyleBible.objects.create(
+            project=self.project1,
+            art_style='Anime',
+            palette=['#FF0000'],
+            lighting_default='Bright',
+            locked_style_prompt_prefix='Anime style',
+        )
+        url = f'/api/stories/projects/{self.project1.id}/style-bible/'
+        del_res = self.client.delete(url)
+        self.assertEqual(del_res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(StyleBible.objects.filter(id=sb.id).exists())
+
+    # 17. User cannot access or modify another user's StyleBible
+    def test_cannot_access_or_modify_other_user_style_bible(self):
+        StyleBible.objects.create(
+            project=self.project2,
+            art_style='Secret Style',
+            palette=['#000000'],
+            lighting_default='Dark',
+            locked_style_prompt_prefix='Secret',
+        )
+        url = f'/api/stories/projects/{self.project2.id}/style-bible/'
+        self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            self.client.patch(url, {'art_style': 'Hacked'}, format='json').status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_404_NOT_FOUND)
+
+    # 18. User cannot modify or delete another user's character
+    def test_cannot_modify_or_delete_other_user_character(self):
+        other_char = Character.objects.create(
+            project=self.project2,
+            name='Other Char',
+            appearance='Normal',
+            uniform='Civilian',
+            hair='Brown',
+        )
+        url = f'/api/stories/projects/{self.project2.id}/characters/{other_char.id}/'
+        self.assertEqual(
+            self.client.patch(url, {'name': 'Hacked'}, format='json').status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_404_NOT_FOUND)
+
+    # 19. User cannot modify or delete another user's environment
+    def test_cannot_modify_or_delete_other_user_environment(self):
+        other_env = Environment.objects.create(
+            project=self.project2,
+            name='Other Env',
+            description='Restricted zone',
+        )
+        url = f'/api/stories/projects/{self.project2.id}/environments/{other_env.id}/'
+        self.assertEqual(
+            self.client.patch(url, {'name': 'Hacked'}, format='json').status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_404_NOT_FOUND)
+
+    # 20. Project can be created with genre and defaults
+    def test_project_create_with_genre(self):
+        url = '/api/stories/projects/'
+        data = {
+            'title': 'Sci-Fi Odyssey',
+            'genre': 'Cyberpunk',
+            'story_notes': 'Neon rain',
+            'historically_grounded': False,
+        }
+        res = self.client.post(url, data, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['genre'], 'Cyberpunk')

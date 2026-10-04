@@ -1,4 +1,4 @@
-from django.contrib.auth import get_user_model, authenticate
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 User = get_user_model()
@@ -51,9 +51,7 @@ class SignupSerializer(serializers.Serializer):
         first_name = parts[0]
         last_name = parts[1] if len(parts) > 1 else ''
 
-        username = email
         user = User.objects.create_user(
-            username=username,
             email=email,
             password=password,
             first_name=first_name,
@@ -76,14 +74,14 @@ class LoginSerializer(serializers.Serializer):
         user = None
         try:
             candidate = User.objects.get(email__iexact=email)
-            user = authenticate(username=candidate.username, password=password)
+            if candidate.check_password(password):
+                user = candidate
         except User.DoesNotExist:
             user = None
         except User.MultipleObjectsReturned:
             for c in User.objects.filter(email__iexact=email):
-                auth_u = authenticate(username=c.username, password=password)
-                if auth_u:
-                    user = auth_u
+                if c.check_password(password):
+                    user = c
                     break
 
         if not user:

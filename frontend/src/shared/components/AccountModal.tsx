@@ -5,6 +5,7 @@ interface AccountModalProps {
   isOpen: boolean;
   onClose: () => void;
   userEmail?: string;
+  fullName?: string;
   userName?: string;
   onSignOut?: () => void;
 }
@@ -13,10 +14,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   isOpen,
   onClose,
   userEmail = 'artist@vizzy.studio',
-  userName = 'Artist',
+  fullName,
+  userName,
   onSignOut,
 }) => {
   if (!isOpen) return null;
+  const displayName = fullName || userName || 'Artist';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs flex items-center justify-center p-4">
@@ -25,10 +28,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         <div className="flex items-center justify-between pb-3 border-b border-[#E7E7E5]">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full bg-[#F5F5F4] border border-[#E7E7E5] flex items-center justify-center font-bold text-xs text-[#171717]">
-              {userName.charAt(0).toUpperCase()}
+              {displayName.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-[#171717]">{userName}</h3>
+              <h3 className="text-sm font-semibold text-[#171717]">{displayName}</h3>
               <p className="text-xs text-[#6B7280]">{userEmail}</p>
             </div>
           </div>

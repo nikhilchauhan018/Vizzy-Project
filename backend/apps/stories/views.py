@@ -81,6 +81,16 @@ class StyleBibleViewSet(viewsets.GenericViewSet):
     def partial_update(self, request, project_pk=None):
         return self.update(request, project_pk=project_pk, partial=True)
 
+    def destroy(self, request, project_pk=None):
+        project = self._get_project()
+        if hasattr(project, 'style_bible') and project.style_bible is not None:
+            project.style_bible.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {"detail": "StyleBible not found for this project."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
 
 class CharacterViewSet(viewsets.ModelViewSet):
     """
