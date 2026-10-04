@@ -3,12 +3,13 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from .models import Project, StyleBible, Character, Environment
+from .models import Project, StyleBible, Character, Environment, ChatMessage
 from .serializers import (
     ProjectSerializer,
     StyleBibleSerializer,
     CharacterSerializer,
     EnvironmentSerializer,
+    ChatMessageSerializer,
 )
 
 
@@ -132,3 +133,34 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         project = self._get_project()
         serializer.save(project=project)
+
+
+class ChatMessageViewSet(viewsets.GenericViewSet):
+    """
+    List and create persistent chat messages for a specific project.
+    Strictly scoped to the project owner.
+    Returned in chronological order.
+    """
+    serializer_class = ChatMessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_project(self):
+        project_id = self.kwargs.get('project_pk')
+        return get_object_or_404(Project, pk=project_id, owner=self.request.user)
+
+    def list(self, request, project_pk=None):
+        project = self._get_project()
+        messages = ChatMessage.objects.filter(project=project).order_by('created_at')
+        page_id = request.query_params.get('page_id')
+        if page_id:
+            messages = messages.filter(page_id=page_id)
+        serializer = self.get_serializer(messages, many=True)
+        return Response(serializer.data)
+
+    def create(self, request, project_pk=None):
+        project = self._get_project()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(project=project)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+

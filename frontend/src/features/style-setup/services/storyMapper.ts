@@ -1,11 +1,26 @@
-import { Project, StyleBible, Character, Environment } from '../../../types/story';
+import { Project, StyleBible, Character, Environment, ChatMessageItem } from '../../../types/story';
 import {
   BackendProject,
   BackendStyleBible,
   BackendCharacter,
   BackendEnvironment,
+  BackendChatMessage,
 } from '../../../services/storiesApi';
 import { PRESET_PROJECTS } from '../data/presets';
+
+export function mapBackendChatMessage(bm: BackendChatMessage): ChatMessageItem {
+  return {
+    id: bm.id,
+    sender: bm.sender,
+    text: bm.content,
+    timestamp: bm.created_at,
+    pageId: bm.page_id || '',
+    type: (bm.message_type as any) || 'text',
+    candidates: bm.payload?.candidates,
+    refinedImageUrl: bm.payload?.refinedImageUrl,
+    actionPrompt: bm.payload?.actionPrompt,
+  };
+}
 
 export function mapBackendStyleBible(sb: BackendStyleBible | null | undefined, projectId: string, fallbackDate?: string): StyleBible {
   return {

@@ -57,3 +57,31 @@ class Environment(models.Model):
     reference_image_url = models.CharField(max_length=1024, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+class ChatMessage(models.Model):
+    SENDER_CHOICES = [
+        ('user', 'User'),
+        ('vizzy', 'Vizzy'),
+        ('system', 'System'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='chat_messages')
+    page_id = models.CharField(max_length=100, blank=True, null=True)
+    sender = models.CharField(max_length=20, choices=SENDER_CHOICES)
+    message_type = models.CharField(max_length=30, default='text')
+    content = models.TextField()
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'story_chat_messages'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['project', 'created_at']),
+            models.Index(fields=['project', 'page_id', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"[{self.sender}] {self.content[:30]}"
+

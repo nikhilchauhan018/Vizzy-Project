@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Project, StyleBible, Character, Environment
+from .models import Project, StyleBible, Character, Environment, ChatMessage
 
 
 class StyleBibleSerializer(serializers.ModelSerializer):
@@ -88,3 +88,25 @@ class ProjectSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'owner', 'created_at', 'updated_at']
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatMessage
+        fields = [
+            'id',
+            'project',
+            'page_id',
+            'sender',
+            'message_type',
+            'content',
+            'payload',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'project', 'created_at']
+
+    def validate_content(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Content cannot be empty.")
+        return value
+

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Project, StyleBible, Character, Environment } from '../../../types/story';
+import { Project, StyleBible, Character, Environment, ChatMessageItem } from '../../../types/story';
 import { PRESET_PROJECTS } from '../data/presets';
 import { storiesApi } from '../../../services/storiesApi';
 import {
@@ -7,6 +7,7 @@ import {
   mapBackendStyleBible,
   mapBackendCharacter,
   mapBackendEnvironment,
+  mapBackendChatMessage,
 } from '../services/storyMapper';
 
 // ONLY store non-authoritative UI session pointer (active project ID) in localStorage
@@ -25,7 +26,7 @@ export function useStoryEngine() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // In-memory UI cache for transient page/panel and chat states during conversation
+  // In-memory UI cache for transient page/panel states
   const uiExtrasCache = useRef<Record<string, Partial<Project>>>({});
 
   // Sync active project ID to localStorage UI session pointer only
@@ -37,7 +38,7 @@ export function useStoryEngine() {
     }
   }, [activeProjectId]);
 
-  // Load authoritative projects from Django backend
+  // Load authoritative projects and their persisted chat messages from Django backend
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
     setApiError(null);
@@ -47,8 +48,15 @@ export function useStoryEngine() {
         const hydrated = await Promise.all(
           backendProjects.map(async (bp) => {
             try {
-              const fullBp = await storiesApi.getProject(bp.id);
-              return mapBackendToProject(fullBp, uiExtrasCache.current[bp.id]);
+              const [fullBp, messages] = await Promise.all([
+                storiesApi.getProject(bp.id),
+                storiesApi.getProjectMessages(bp.id).catch(() => []),
+              ]);
+              const projectObj = mapBackendToProject(fullBp, uiExtrasCache.current[bp.id]);
+              if (Array.isArray(messages) && messages.length > 0) {
+                projectObj.chatHistory = messages.map(mapBackendChatMessage);
+              }
+              return projectObj;
             } catch {
               return mapBackendToProject(bp, uiExtrasCache.current[bp.id]);
             }
@@ -130,15 +138,121 @@ export function useStoryEngine() {
     loadProjects();
   }, [loadProjects]);
 
+  // Fetch persisted messages when active project changes
+  const fetchActiveProjectMessages = useCallback(async (projectId: string) => {
+    if (!projectId || projectId.startsWith('preset-')) return;
+    try {
+      const messages = await storiesApi.getProjectMessages(projectId);
+      if (Array.isArray(messages)) {
+        const mapped = messages.map(mapBackendChatMessage);
+        setProjects((prev) =>
+          prev.map((p) => (p.id === projectId ? { ...p, chatHistory: mapped } : p))
+        );
+      }
+    } catch (err: any) {
+      console.warn('Failed to load project messages:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeProjectId && !activeProjectId.startsWith('preset-')) {
+      fetchActiveProjectMessages(activeProjectId);
+    }
+  }, [activeProjectId, fetchActiveProjectMessages]);
+
   const activeProject =
     projects.find((p) => p.id === activeProjectId) || projects[0] || PRESET_PROJECTS[0];
 
-  // 1. Update Project (Authoritative server update with rollback on failure)
+  // 1. Send / Persist Chat Message (Authoritative server persistence with rollback)
+  const sendChatMessage = async (
+    text: string,
+    options?: {
+      pageId?: string | null;
+      sender?: 'user' | 'vizzy' | 'system';
+      messageType?: string;
+      payload?: Record<string, any>;
+    }
+  ): Promise<ChatMessageItem> => {
+    if (!text || !text.trim()) {
+      throw new Error('Message content cannot be empty.');
+    }
+
+    const sender = options?.sender || 'user';
+    const pageId = options?.pageId || null;
+    const messageType = options?.messageType || 'text';
+    const payload = options?.payload || {};
+
+    const previousProjects = projects;
+    setApiError(null);
+
+    // Optimistic UI representation
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: ChatMessageItem = {
+      id: tempId,
+      sender,
+      text,
+      timestamp: new Date().toISOString(),
+      pageId: pageId || '',
+      type: (messageType as any) || 'text',
+      candidates: payload.candidates,
+      refinedImageUrl: payload.refinedImageUrl,
+      actionPrompt: payload.actionPrompt,
+    };
+
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === activeProject.id
+          ? {
+              ...p,
+              chatHistory: [...(p.chatHistory || []), optimisticMsg],
+            }
+          : p
+      )
+    );
+
+    if (!activeProject.id.startsWith('preset-')) {
+      try {
+        const confirmed = await storiesApi.createProjectMessage(activeProject.id, {
+          sender,
+          content: text,
+          page_id: pageId,
+          message_type: messageType,
+          payload,
+        });
+
+        const mapped = mapBackendChatMessage(confirmed);
+
+        // Replace optimistic placeholder with server-confirmed message
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === activeProject.id
+              ? {
+                  ...p,
+                  chatHistory: (p.chatHistory || []).map((m) =>
+                    m.id === tempId ? mapped : m
+                  ),
+                }
+              : p
+          )
+        );
+        return mapped;
+      } catch (err: any) {
+        // Rollback state on failure so no stale or corrupt state remains
+        setProjects(previousProjects);
+        const msg = err.message || 'Failed to send message';
+        setApiError(msg);
+        throw err;
+      }
+    }
+
+    return optimisticMsg;
+  };
+
+  // 2. Update Project (Authoritative server update with rollback on failure)
   const updateProject = async (updates: Partial<Project>) => {
     const previousProjects = projects;
     setApiError(null);
 
-    // Cache transient in-memory UI extras (chat, pages, reference)
     uiExtrasCache.current[activeProject.id] = {
       ...(uiExtrasCache.current[activeProject.id] || {}),
       chatHistory: updates.chatHistory ?? activeProject.chatHistory,
@@ -147,7 +261,6 @@ export function useStoryEngine() {
       uploadedReferenceImage: updates.uploadedReferenceImage ?? activeProject.uploadedReferenceImage,
     };
 
-    // Optimistic UI update
     setProjects((prev) =>
       prev.map((p) =>
         p.id === activeProject.id
@@ -168,7 +281,6 @@ export function useStoryEngine() {
 
         if (Object.keys(backendPayload).length > 0) {
           const confirmed = await storiesApi.updateProject(activeProject.id, backendPayload);
-          // Confirm state with authoritative server response
           setProjects((prev) =>
             prev.map((p) =>
               p.id === activeProject.id
@@ -194,7 +306,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 2. Delete Project (Authoritative server delete with rollback on failure)
+  // 3. Delete Project
   const deleteProject = async (projectId: string) => {
     const previousProjects = projects;
     const previousActiveId = activeProjectId;
@@ -220,7 +332,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 3. Update StyleBible (Authoritative server update with rollback on failure)
+  // 4. Update StyleBible
   const updateStyleBible = async (updates: Partial<StyleBible>) => {
     const previousProjects = projects;
     setApiError(null);
@@ -252,7 +364,6 @@ export function useStoryEngine() {
           locked_style_prompt_prefix: updates.locked_style_prompt_prefix,
         });
 
-        // Sync state from server-confirmed StyleBible
         setProjects((prev) =>
           prev.map((p) =>
             p.id === activeProject.id
@@ -273,7 +384,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 4. Character CRUD (Server-confirmed updates and rollbacks)
+  // 5. Character CRUD
   const addCharacter = async (
     characterData: Omit<Character, 'id' | 'projectId' | 'created_at' | 'updated_at'>
   ) => {
@@ -405,7 +516,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 5. Environment CRUD (Server-confirmed updates and rollbacks)
+  // 6. Environment CRUD
   const addEnvironment = async (
     envData: Omit<Environment, 'id' | 'projectId' | 'created_at' | 'updated_at'>
   ) => {
@@ -531,7 +642,7 @@ export function useStoryEngine() {
     }
   };
 
-  // 6. Create Project (Server-confirmed: initialized with StyleBible on backend)
+  // 7. Create Project
   const createNewProject = async (title: string = 'Untitled Story') => {
     setApiError(null);
     try {
@@ -542,7 +653,6 @@ export function useStoryEngine() {
         status: 'SETUP',
       });
 
-      // Initialize default StyleBible on backend
       await storiesApi.createOrUpdateStyleBible(backendProject.id, {
         art_style: 'Modern cinematic graphic novel, crisp brush inking, atmospheric lighting',
         palette: ['#1E293B', '#3B82F6', '#8B5CF6', '#F59E0B', '#F8FAFC'],
@@ -574,6 +684,8 @@ export function useStoryEngine() {
     activeProject,
     activeProjectId,
     setActiveProjectId,
+    sendChatMessage,
+    fetchActiveProjectMessages,
     updateProject,
     deleteProject,
     updateStyleBible,
