@@ -1,4 +1,5 @@
-from rest_framework.authentication import TokenAuthentication
+from django.conf import settings
+from rest_framework.authentication import TokenAuthentication, get_authorization_header
 from rest_framework import exceptions
 
 
@@ -10,23 +11,46 @@ class BearerTokenAuthentication(TokenAuthentication):
     keyword = 'Bearer'
 
     def authenticate(self, request):
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header:
+        raw_header = get_authorization_header(request)
+        if not raw_header:
+            auth_val = (
+                getattr(request, 'headers', {}).get('Authorization')
+                or request.META.get('HTTP_AUTHORIZATION')
+                or request.META.get('AUTHORIZATION')
+            )
+            if auth_val:
+                raw_header = auth_val.encode('iso-8859-1') if isinstance(auth_val, str) else auth_val
+
+        has_auth = bool(raw_header)
+        auth_parts = raw_header.split() if has_auth else []
+        scheme = auth_parts[0].decode('iso-8859-1') if auth_parts else 'None'
+
+        if getattr(settings, 'DEBUG', False):
+            path = getattr(request, 'path', 'unknown')
+            print(f"AUTH DEBUG DJANGO: path = {path}, hasAuthorizationHeader = {has_auth}, scheme = {scheme}")
+
+        if not raw_header:
             return None
 
-        parts = auth_header.split()
-        if len(parts) != 2:
+        if len(auth_parts) != 2:
             return None
 
-        scheme = parts[0].lower()
-        if scheme not in ('bearer', 'token'):
+        if scheme.lower() not in ('bearer', 'token'):
             return None
 
-        token_key = parts[1]
+        try:
+            token_key = auth_parts[1].decode('iso-8859-1')
+        except UnicodeError:
+            raise exceptions.AuthenticationFailed('Invalid token header. Token string should contain valid characters.')
+
         if token_key == 'dev-token':
             return None
 
-        return self.authenticate_credentials(token_key)
+        user_auth_tuple = self.authenticate_credentials(token_key)
+        if user_auth_tuple and getattr(settings, 'DEBUG', False):
+            user, _ = user_auth_tuple
+            print(f"AUTH DEBUG DJANGO: authenticated user email = {user.email}")
+        return user_auth_tuple
 
     def authenticate_header(self, request):
         return 'Bearer'

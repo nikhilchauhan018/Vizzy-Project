@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework import authentication
+from rest_framework.authentication import get_authorization_header
 
 User = get_user_model()
 
@@ -18,15 +19,28 @@ class DevelopmentAuthentication(authentication.BaseAuthentication):
         if not getattr(settings, 'DEBUG', False):
             return None
 
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header:
+        raw_header = get_authorization_header(request)
+        if not raw_header:
+            auth_val = (
+                getattr(request, 'headers', {}).get('Authorization')
+                or request.META.get('HTTP_AUTHORIZATION')
+                or request.META.get('AUTHORIZATION')
+            )
+            if auth_val:
+                raw_header = auth_val.encode('iso-8859-1') if isinstance(auth_val, str) else auth_val
+
+        if not raw_header:
             return None
 
-        parts = auth_header.split()
-        if len(parts) != 2 or parts[0].lower() != 'bearer':
+        parts = raw_header.split()
+        if len(parts) != 2 or parts[0].lower() != b'bearer':
             return None
 
-        token = parts[1]
+        try:
+            token = parts[1].decode('iso-8859-1')
+        except UnicodeError:
+            return None
+
         if token != 'dev-token':
             return None
 

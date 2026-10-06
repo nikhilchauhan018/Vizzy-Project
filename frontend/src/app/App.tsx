@@ -24,7 +24,7 @@ export default function App() {
     createNewProject,
     resetToPresets,
     apiError,
-  } = useStoryEngine();
+  } = useStoryEngine(isAuthenticated);
 
   // Navigation & Drawer States
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
