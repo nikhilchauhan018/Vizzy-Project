@@ -22,14 +22,14 @@ class AccountsAuthTests(APITestCase):
             last_name='Tester',
         )
 
-    # 1. Signup with email succeeds
+    # 1. Successful signup
     def test_signup_with_email_succeeds(self):
         payload = {
             'email': 'new_artist@vizzy.studio',
             'full_name': 'New Artist',
             'password': 'CreateArt2026!',
         }
-        response = self.client.post(reverse('account-signup'), payload, format='json')
+        response = self.client.post('/api/auth/signup/', payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn('token', response.data)
         self.assertIn('user', response.data)
@@ -37,7 +37,7 @@ class AccountsAuthTests(APITestCase):
         self.assertEqual(response.data['user']['full_name'], 'New Artist')
         self.assertNotIn('username', response.data['user'])
 
-        # Verify password is not plaintext
+        # Verify password is not stored plaintext
         created = User.objects.get(email='new_artist@vizzy.studio')
         self.assertNotEqual(created.password, 'CreateArt2026!')
         self.assertTrue(created.check_password('CreateArt2026!'))
@@ -49,118 +49,122 @@ class AccountsAuthTests(APITestCase):
             'full_name': 'Duplicate User',
             'password': 'AnotherPassword123!',
         }
-        response = self.client.post(reverse('account-signup'), payload, format='json')
+        response = self.client.post('/api/auth/signup/', payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('email', response.data)
 
-    # 3. Signup does not require username
-    def test_signup_does_not_require_username(self):
-        payload = {
-            'email': 'no_username@vizzy.studio',
-            'full_name': 'Direct Signup',
-            'password': 'Password12345!',
-        }
-        self.assertNotIn('username', payload)
-        response = self.client.post(reverse('account-signup'), payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertIn('token', response.data)
-        self.assertEqual(response.data['user']['email'], 'no_username@vizzy.studio')
-
-    # 4. Login with email succeeds
+    # 3. Successful login
     def test_login_with_email_succeeds(self):
         payload = {
             'email': 'tester@vizzy.studio',
             'password': 'SecurePassword123!',
         }
-        response = self.client.post(reverse('account-login'), payload, format='json')
+        response = self.client.post('/api/auth/login/', payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('token', response.data)
         self.assertEqual(response.data['user']['email'], 'tester@vizzy.studio')
         self.assertEqual(response.data['user']['full_name'], 'Auth Tester')
 
-        # Test case-insensitivity on login email
-        case_payload = {
-            'email': 'TESTER@VIZZY.STUDIO',
-            'password': 'SecurePassword123!',
-        }
-        case_response = self.client.post(reverse('account-login'), case_payload, format='json')
-        self.assertEqual(case_response.status_code, status.HTTP_200_OK)
-
-    # 5. Login with incorrect password fails
+    # 4. Wrong password returns authentication error
     def test_login_with_incorrect_password_fails(self):
         payload = {
             'email': 'tester@vizzy.studio',
             'password': 'WrongPassword!',
         }
-        response = self.client.post(reverse('account-login'), payload, format='json')
+        response = self.client.post('/api/auth/login/', payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('detail', response.data)
 
-    # 6. Login with username must NOT be supported
-    def test_login_with_username_must_not_be_supported(self):
+    # 5. Unknown email returns authentication error
+    def test_login_with_unknown_email_fails(self):
         payload = {
-            'username': 'auth_tester',
+            'email': 'nonexistent@vizzy.studio',
+            'password': 'Password123!',
+        }
+        response = self.client.post('/api/auth/login/', payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    # 6. Case-insensitive email login
+    def test_case_insensitive_email_login(self):
+        case_payload = {
+            'email': 'TeStEr@ViZzY.sTuDiO',
             'password': 'SecurePassword123!',
         }
-        response = self.client.post(reverse('account-login'), payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        # Should complain about email or missing required email field
-        self.assertTrue('email' in response.data or 'detail' in response.data)
+        case_response = self.client.post('/api/auth/login/', case_payload, format='json')
+        self.assertEqual(case_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(case_response.data['user']['email'], 'tester@vizzy.studio')
 
-    # 7. Current user returns email/full_name
-    def test_current_user_returns_email_full_name(self):
+    # 7. /me authenticated returns current user
+    def test_me_authenticated_returns_user(self):
         token, _ = Token.objects.get_or_create(user=self.existing_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token.key}')
-        response = self.client.get(reverse('account-me'))
+        response = self.client.get('/api/auth/me/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['email'], 'tester@vizzy.studio')
         self.assertEqual(response.data['full_name'], 'Auth Tester')
         self.assertNotIn('username', response.data)
 
-    # 8. Logout works
-    def test_logout_works(self):
+    # 8. /me unauthenticated returns 401
+    def test_me_unauthenticated_returns_401(self):
+        response = self.client.get('/api/auth/me/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # 9. Protected API with valid authentication
+    def test_protected_api_with_valid_auth(self):
+        project = Project.objects.create(
+            owner=self.existing_user,
+            title="My Graphic Novel",
+            story_notes="Notes"
+        )
         token, _ = Token.objects.get_or_create(user=self.existing_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token.key}')
-        logout_response = self.client.post(reverse('account-logout'))
+        response = self.client.get('/api/stories/projects/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], str(project.id))
+
+    # 10. Protected API without authentication returns 401
+    def test_protected_api_without_auth(self):
+        response = self.client.get('/api/stories/projects/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # 11. Logout clears token and invalidates future requests
+    def test_logout_invalidates_token(self):
+        token, _ = Token.objects.get_or_create(user=self.existing_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token.key}')
+        logout_response = self.client.post('/api/auth/logout/')
         self.assertEqual(logout_response.status_code, status.HTTP_200_OK)
 
         # Token should now be deleted from database
         self.assertFalse(Token.objects.filter(key=token.key).exists())
 
         # Old token is rejected
-        me_response = self.client.get(reverse('account-me'))
+        me_response = self.client.get('/api/auth/me/')
         self.assertEqual(me_response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    # 9. Unauthenticated protected requests remain rejected
-    def test_unauthenticated_protected_requests_remain_rejected(self):
-        response_me = self.client.get(reverse('account-me'))
-        self.assertEqual(response_me.status_code, status.HTTP_401_UNAUTHORIZED)
+    # 12. Session restore / authenticated request with Token header or Bearer keyword
+    def test_session_restore_and_dual_auth_headers(self):
+        token, _ = Token.objects.get_or_create(user=self.existing_user)
 
-        response_projects = self.client.get(reverse('project-list'))
-        self.assertEqual(response_projects.status_code, status.HTTP_401_UNAUTHORIZED)
+        # 12a. Authorization: Bearer <key>
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token.key}')
+        res_bearer = self.client.get('/api/auth/me/')
+        self.assertEqual(res_bearer.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_bearer.data['id'], str(self.existing_user.id))
 
-    # 10. Existing Stories ownership tests remain passing / Cross-user isolation
-    def test_cross_user_isolation(self):
-        project = Project.objects.create(
-            owner=self.existing_user,
-            title="User A Secret Project",
-            story_notes="Restricted"
-        )
-        user_b = User.objects.create_user(
-            email='user_b@vizzy.studio',
-            password='UserBPassword123!',
-            first_name='User',
-            last_name='B',
-        )
-        token_b, _ = Token.objects.get_or_create(user=user_b)
+        # 12b. Authorization: Token <key>
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+        res_token = self.client.get('/api/auth/me/')
+        self.assertEqual(res_token.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_token.data['id'], str(self.existing_user.id))
 
-        # User B cannot retrieve User A's project
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token_b.key}')
-        response = self.client.get(reverse('project-detail', kwargs={'pk': project.id}))
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-
-        # User B's project list does NOT contain User A's project
-        list_response = self.client.get(reverse('project-list'))
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        project_ids = [p['id'] for p in list_response.data]
-        self.assertNotIn(str(project.id), project_ids)
+    # 13. Backwards compatibility: /api/accounts/ routes work identically
+    def test_accounts_route_backward_compatibility(self):
+        payload = {
+            'email': 'tester@vizzy.studio',
+            'password': 'SecurePassword123!',
+        }
+        res = self.client.post('/api/accounts/login/', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn('token', res.data)

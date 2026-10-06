@@ -15,7 +15,7 @@ export interface AuthResponse {
 }
 
 const TOKEN_KEY = 'vizzy_auth_token';
-const BASE_URL = '/api/accounts';
+const BASE_URL = '/api/auth';
 
 export function getAuthToken(): string | null {
   try {
