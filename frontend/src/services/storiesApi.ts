@@ -72,7 +72,7 @@ export interface BackendProject {
   updated_at: string;
 }
 
-const BASE_URL = '/api/stories';
+const BASE_URL = (import.meta.env?.VITE_STORIES_API_BASE_URL as string) || '/api/stories';
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
