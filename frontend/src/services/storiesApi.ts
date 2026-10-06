@@ -101,9 +101,20 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+function logStoriesDebug(method: string, path: string) {
+  if (import.meta.env?.DEV) {
+    const headers = getAuthHeaders();
+    const hasAuth = Boolean(headers['Authorization']);
+    console.log(
+      `AUTH DEBUG: method = ${method}, path = ${path}, hasAuthorizationHeader = ${hasAuth}, hasToken = ${hasAuth}`
+    );
+  }
+}
+
 export const storiesApi = {
   // Project endpoints
   async listProjects(): Promise<BackendProject[]> {
+    logStoriesDebug('GET', `${BASE_URL}/projects/`);
     const res = await fetch(`${BASE_URL}/projects/`, {
       headers: getAuthHeaders(),
     });

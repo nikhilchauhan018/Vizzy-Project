@@ -17,23 +17,30 @@ export interface AuthResponse {
 const TOKEN_KEY = 'vizzy_auth_token';
 const BASE_URL = (import.meta.env?.VITE_AUTH_API_BASE_URL as string) || '/api/auth';
 
+let inMemoryToken: string | null = null;
+
 export function getAuthToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    const val = localStorage.getItem(TOKEN_KEY);
+    if (val && val !== 'null' && val !== 'undefined' && val.trim().length > 0) {
+      return val.trim();
+    }
   } catch {
-    return null;
+    // In restrictive iframe environments, localStorage access might throw
   }
+  return inMemoryToken;
 }
 
 export function setAuthToken(token: string | null): void {
+  inMemoryToken = token ? token.trim() : null;
   try {
-    if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
+    if (inMemoryToken) {
+      localStorage.setItem(TOKEN_KEY, inMemoryToken);
     } else {
       localStorage.removeItem(TOKEN_KEY);
     }
   } catch (e) {
-    console.error('Failed to update auth token in storage:', e);
+    console.warn('Failed to update auth token in localStorage:', e);
   }
 }
 
@@ -46,6 +53,16 @@ export function getAuthHeaders(): Record<string, string> {
     headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
+}
+
+function logAuthDebug(method: string, path: string) {
+  if (import.meta.env?.DEV) {
+    const token = getAuthToken();
+    const hasToken = Boolean(token && token.length > 0);
+    console.log(
+      `AUTH DEBUG: method = ${method}, path = ${path}, hasAuthorizationHeader = ${hasToken}, hasToken = ${hasToken}`
+    );
+  }
 }
 
 async function handleAuthResponse<T>(res: Response): Promise<T> {
@@ -86,6 +103,7 @@ export const authApi = {
     full_name: string;
     password: string;
   }): Promise<AuthResponse> {
+    logAuthDebug('POST', `${BASE_URL}/signup/`);
     const res = await fetch(`${BASE_URL}/signup/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -97,6 +115,7 @@ export const authApi = {
   },
 
   async login(data: { email: string; password: string }): Promise<AuthResponse> {
+    logAuthDebug('POST', `${BASE_URL}/login/`);
     const res = await fetch(`${BASE_URL}/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -108,6 +127,7 @@ export const authApi = {
   },
 
   async logout(): Promise<void> {
+    logAuthDebug('POST', `${BASE_URL}/logout/`);
     try {
       const headers = getAuthHeaders();
       await fetch(`${BASE_URL}/logout/`, {
@@ -123,6 +143,7 @@ export const authApi = {
 
   async getCurrentUser(): Promise<AuthUser> {
     const token = getAuthToken();
+    logAuthDebug('GET', `${BASE_URL}/me/`);
     if (!token) {
       throw new Error('No authentication token found.');
     }

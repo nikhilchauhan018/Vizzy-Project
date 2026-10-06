@@ -13,7 +13,7 @@ import {
 // ONLY store non-authoritative UI session pointer (active project ID) in localStorage
 const ACTIVE_ID_KEY = 'vizzy_ui_active_project_id';
 
-export function useStoryEngine() {
+export function useStoryEngine(isAuthenticated: boolean = false) {
   const [projects, setProjects] = useState<Project[]>(PRESET_PROJECTS);
   const [activeProjectId, setActiveProjectId] = useState<string>(() => {
     try {
@@ -40,6 +40,12 @@ export function useStoryEngine() {
 
   // Load authoritative projects and their persisted chat messages from Django backend
   const loadProjects = useCallback(async () => {
+    if (!isAuthenticated) {
+      setProjects(PRESET_PROJECTS);
+      setApiError(null);
+      return;
+    }
+
     setIsLoading(true);
     setApiError(null);
     try {
@@ -132,11 +138,15 @@ export function useStoryEngine() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    loadProjects();
-  }, [loadProjects]);
+    if (isAuthenticated) {
+      loadProjects();
+    } else {
+      setApiError(null);
+    }
+  }, [isAuthenticated, loadProjects]);
 
   // Fetch persisted messages when active project changes
   const fetchActiveProjectMessages = useCallback(async (projectId: string) => {
