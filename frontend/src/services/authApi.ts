@@ -66,35 +66,62 @@ function logAuthDebug(method: string, path: string) {
 }
 
 async function handleAuthResponse<T>(res: Response): Promise<T> {
+  const contentType = res.headers.get('content-type') || '';
+  const isJson = contentType.toLowerCase().includes('application/json');
+
   if (!res.ok) {
-    let errorDetail = `Authentication request failed (${res.status})`;
-    try {
-      const err = await res.json();
-      if (typeof err === 'object' && err !== null) {
-        if (err.detail) {
-          errorDetail = err.detail;
-        } else if (err.non_field_errors) {
-          errorDetail = Array.isArray(err.non_field_errors)
-            ? err.non_field_errors.join(' ')
-            : String(err.non_field_errors);
-        } else {
-          const messages = Object.entries(err)
-            .map(([field, msg]) => `${field}: ${Array.isArray(msg) ? msg.join(', ') : msg}`)
-            .join('; ');
-          if (messages) errorDetail = messages;
+    let errorDetail = '';
+    if (isJson) {
+      try {
+        const err = await res.json();
+        if (typeof err === 'object' && err !== null) {
+          if (err.detail) {
+            errorDetail = String(err.detail);
+          } else if (err.non_field_errors) {
+            errorDetail = Array.isArray(err.non_field_errors)
+              ? err.non_field_errors.join(' ')
+              : String(err.non_field_errors);
+          } else {
+            const messages = Object.entries(err)
+              .map(([field, msg]) => `${field}: ${Array.isArray(msg) ? msg.join(', ') : msg}`)
+              .join('; ');
+            if (messages) errorDetail = messages;
+          }
         }
+      } catch {
+        // Fallback gracefully if error body is not valid JSON
       }
-    } catch {
-      // Fallback to HTTP status text
     }
-    throw new Error(errorDetail);
+
+    if (res.status === 400 || res.status === 401) {
+      if (errorDetail && errorDetail.toLowerCase().includes('credential')) {
+        throw new Error('Invalid email or password.');
+      }
+      throw new Error(errorDetail || 'Invalid email or password.');
+    } else if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error('Unable to connect to Vizzy. Please try again.');
+    } else if (res.status >= 500) {
+      throw new Error('Something went wrong on our server. Please try again.');
+    } else {
+      throw new Error(errorDetail || 'Unable to complete sign in right now. Please try again.');
+    }
   }
 
   if (res.status === 204) {
     return {} as T;
   }
 
-  return res.json();
+  if (!isJson) {
+    console.warn(`[authApi] Expected JSON response but received: ${contentType}`);
+    throw new Error('Unable to complete sign in right now. Please try again.');
+  }
+
+  try {
+    return await res.json();
+  } catch (err) {
+    console.warn('[authApi] Failed to parse JSON response:', err);
+    throw new Error('Unable to complete sign in right now. Please try again.');
+  }
 }
 
 export const authApi = {

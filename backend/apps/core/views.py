@@ -26,7 +26,7 @@ def check_redis(timeout: float = 1.5) -> tuple[bool, str]:
     """Verifies Redis connectivity (Upstash / Redis) without exposing secrets."""
     redis_url = getattr(settings, 'REDIS_URL', '') or os.environ.get('REDIS_URL', '')
     if not redis_url:
-        return True, "not_configured"
+        return False, "not_configured"
     try:
         client = redis.from_url(
             redis_url,
@@ -44,7 +44,9 @@ def check_redis(timeout: float = 1.5) -> tuple[bool, str]:
 class HealthCheckView(APIView):
     """
     Public unauthenticated health and readiness check endpoint.
-    Reports database and Redis status alongside the current instance ID.
+    Reports database and Redis readiness alongside the current instance ID.
+    Returns HTTP 200 (healthy) when all required dependencies are connected.
+    Returns HTTP 503 (unhealthy) when either database or Redis is disconnected.
     """
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -54,12 +56,9 @@ class HealthCheckView(APIView):
         redis_ok, redis_status = check_redis()
         instance_id = os.environ.get('INSTANCE_ID', 'vizzy-app')
 
-        if not db_ok:
+        if not db_ok or not redis_ok:
             overall_status = "unhealthy"
             http_status = status.HTTP_503_SERVICE_UNAVAILABLE
-        elif not redis_ok and redis_status != "not_configured":
-            overall_status = "degraded"
-            http_status = status.HTTP_200_OK
         else:
             overall_status = "healthy"
             http_status = status.HTTP_200_OK

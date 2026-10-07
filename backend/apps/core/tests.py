@@ -46,14 +46,14 @@ class HealthCheckTests(TestCase):
         self.assertTrue(response.has_header('X-Served-By'))
 
     @patch('apps.core.views.check_redis')
-    def test_health_check_degraded_when_redis_fails(self, mock_redis):
-        """When Redis is down but DB is healthy, returns 200 OK with degraded status."""
+    def test_health_check_unhealthy_when_redis_fails(self, mock_redis):
+        """When Redis fails, returns 503 Service Unavailable with unhealthy status."""
         mock_redis.return_value = (False, 'disconnected')
 
         response = self.client.get('/api/health/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         data = response.json()
-        self.assertEqual(data['status'], 'degraded')
+        self.assertEqual(data['status'], 'unhealthy')
         self.assertEqual(data['database'], 'connected')
         self.assertEqual(data['redis'], 'disconnected')
 

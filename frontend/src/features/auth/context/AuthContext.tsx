@@ -74,9 +74,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setTokenState(res.token);
       setUser(res.user);
     } catch (err: any) {
-      const msg = err.message || 'Login failed. Please check your credentials.';
+      let msg = err?.message || 'Invalid email or password.';
+      if (err instanceof TypeError || err?.name === 'TypeError' || msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('network')) {
+        msg = 'Unable to connect to Vizzy. Please try again.';
+      } else if (msg.includes('<') || msg.includes('doctype') || msg.includes('JSON') || msg.includes('SyntaxError')) {
+        msg = 'Unable to complete sign in right now. Please try again.';
+      }
       setError(msg);
-      throw err;
+      throw new Error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -95,9 +100,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTokenState(res.token);
         setUser(res.user);
       } catch (err: any) {
-        const msg = err.message || 'Signup failed. Please check your information.';
+        let msg = err?.message || 'Signup failed. Please check your information.';
+        if (err instanceof TypeError || err?.name === 'TypeError' || msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('network')) {
+          msg = 'Unable to connect to Vizzy. Please try again.';
+        } else if (msg.includes('<') || msg.includes('doctype') || msg.includes('JSON') || msg.includes('SyntaxError')) {
+          msg = 'Unable to complete sign in right now. Please try again.';
+        }
         setError(msg);
-        throw err;
+        throw new Error(msg);
       } finally {
         setIsLoading(false);
       }
