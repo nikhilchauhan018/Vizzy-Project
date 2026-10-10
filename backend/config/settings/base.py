@@ -114,7 +114,8 @@ REDIS_URL = os.environ.get('REDIS_URL', 'rediss://default:password@xxxxx.upstash
 # Celery Configuration (native rediss:// TLS support)
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_REDIS_BACKEND_USE_SSL = REDIS_URL.startswith('rediss://') if REDIS_URL else False
+# Note: redis-py handles rediss:// scheme natively. Setting redis_backend_use_ssl to a bool causes TypeError in Celery 5.3+
+CELERY_REDIS_BACKEND_USE_SSL = None
 
 # Channels Channel Layer Configuration (native rediss:// TLS support)
 CHANNEL_LAYERS = {

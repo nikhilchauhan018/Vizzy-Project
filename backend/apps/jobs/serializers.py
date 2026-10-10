@@ -42,6 +42,7 @@ class GenerationJobSerializer(serializers.ModelSerializer):
 class GenerationJobCreateSerializer(serializers.Serializer):
     panel_id = serializers.UUIDField(required=False)
     panel_version_id = serializers.UUIDField(required=False)
+    instruction = serializers.CharField(required=False, allow_blank=True, default='')
     prompt_override = serializers.CharField(required=False, allow_blank=True, default='')
     num_candidates = serializers.IntegerField(required=False, default=3, min_value=1, max_value=6)
 

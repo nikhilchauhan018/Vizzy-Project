@@ -8,10 +8,12 @@ from typing import Optional
 from celery import shared_task
 from django.db import transaction
 
+from apps.billing.services.credit_ledger import CreditLedger
 from apps.jobs.models import GenerationJob, JobCheckpoint
 from apps.jobs.services.concurrency_guard import ConcurrencyGuard
 from apps.pages.models import Candidate
 from apps.pages.services.prompt_compiler import compile_prompt
+from apps.stories.services.scene_extractor import extract_scene_json
 from apps.providers.exceptions import (
     ProviderRateLimitError,
     ProviderUnavailableError,
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 def run_generation_pipeline(
     self,
     job_id: str,
+    instruction: str = '',
     prompt_override: str = '',
     num_candidates: int = 3,
     user_auth_token: Optional[str] = None,
@@ -68,7 +71,20 @@ def run_generation_pipeline(
         if job.has_checkpoint(JobCheckpoint.CheckpointStep.EXTRACT_SCENE):
             scene_data = job.get_checkpoint(JobCheckpoint.CheckpointStep.EXTRACT_SCENE).get('scene_json', {})
         else:
-            scene_data = panel.scene_json or {}
+            if instruction and instruction.strip():
+                scene_data = extract_scene_json(
+                    instruction=instruction.strip(),
+                    project=project,
+                    user_auth_token=user_auth_token,
+                    fallback_scene=panel.scene_json,
+                )
+            else:
+                scene_data = panel.scene_json or {}
+            
+            with transaction.atomic():
+                panel.scene_json = scene_data
+                panel.save(update_fields=['scene_json', 'updated_at'])
+
             job.record_checkpoint(JobCheckpoint.CheckpointStep.EXTRACT_SCENE, {'scene_json': scene_data})
 
         # --- STEP 2: COMPILE_PROMPT CHECKPOINT ---
@@ -192,6 +208,13 @@ def run_generation_pipeline(
                 current_step='MAX_RETRIES_EXCEEDED',
                 error_message=f"Exceeded max retries: {exc}",
             )
+            if job.user:
+                try:
+                    if not job.has_checkpoint('REFUND_ISSUED'):
+                        CreditLedger.refund(job.user, amount=10, description=f"Refund for failed job {job.id}")
+                        job.record_checkpoint('REFUND_ISSUED', {'refunded': True, 'amount': 10})
+                except Exception as ref_err:
+                    logger.error(f"Failed to refund credits for job {job.id}: {ref_err}")
             if user_id:
                 ConcurrencyGuard.release(user_id, str(job.id))
             return {'status': 'FAILED_FINAL', 'error': str(exc)}
@@ -203,6 +226,13 @@ def run_generation_pipeline(
             current_step='FAILED_FINAL',
             error_message=str(exc),
         )
+        if job.user:
+            try:
+                if not job.has_checkpoint('REFUND_ISSUED'):
+                    CreditLedger.refund(job.user, amount=10, description=f"Refund for failed job {job.id}")
+                    job.record_checkpoint('REFUND_ISSUED', {'refunded': True, 'amount': 10})
+            except Exception as ref_err:
+                logger.error(f"Failed to refund credits for job {job.id}: {ref_err}")
         if user_id:
             ConcurrencyGuard.release(user_id, str(job.id))
         return {'status': 'FAILED_FINAL', 'error': str(exc)}

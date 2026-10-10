@@ -3,6 +3,7 @@ from rest_framework import status, views, permissions
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 
+from apps.billing.services.credit_ledger import CreditLedger, InsufficientCreditsError
 from apps.jobs.models import GenerationJob
 from apps.jobs.serializers import (
     GenerationJobSerializer,
@@ -16,7 +17,7 @@ from apps.pages.models import Panel, PanelVersion
 class JobGenerateView(views.APIView):
     """
     Provider-agnostic endpoint to enqueue an asynchronous GenerationJob.
-    Validates ownership, enforces per-user concurrency limit, and dispatches Celery task.
+    Validates ownership, enforces per-user concurrency limit, deducts credits, and dispatches Celery task.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -27,6 +28,7 @@ class JobGenerateView(views.APIView):
 
         panel_id = validated.get('panel_id')
         panel_version_id = validated.get('panel_version_id')
+        instruction = validated.get('instruction', '')
         prompt_override = validated.get('prompt_override', '')
         num_candidates = validated.get('num_candidates', 3)
 
@@ -73,7 +75,24 @@ class JobGenerateView(views.APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        # 3. Create GenerationJob in QUEUED state
+        # 3. Credit Ledger Check & Deduction
+        try:
+            CreditLedger.deduct(
+                request.user,
+                amount=10,
+                description=f"Generation job {job_uuid} for panel {panel.id}",
+            )
+        except InsufficientCreditsError as ice:
+            ConcurrencyGuard.release(str(request.user.id), str(job_uuid))
+            return Response(
+                {
+                    'detail': str(ice),
+                    'code': 'insufficient_credits',
+                },
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+
+        # 4. Create GenerationJob in QUEUED state
         job = GenerationJob.objects.create(
             id=job_uuid,
             panel_version=panel_version,
@@ -84,26 +103,38 @@ class JobGenerateView(views.APIView):
 
         user_auth_token = request.headers.get('X-Puter-Auth-Token') or None
 
-        # 4. Asynchronously enqueue the Celery pipeline
+        # 5. Asynchronously enqueue the Celery pipeline
         try:
             run_generation_pipeline.delay(
                 str(job.id),
+                instruction=instruction,
                 prompt_override=prompt_override,
                 num_candidates=num_candidates,
                 user_auth_token=user_auth_token,
             )
         except Exception:
-            # Fallback if Celery is operating synchronously in development/test
-            run_generation_pipeline.apply(
-                args=[str(job.id)],
-                kwargs={
-                    'prompt_override': prompt_override,
-                    'num_candidates': num_candidates,
-                    'user_auth_token': user_auth_token,
-                },
-            )
+            # Fallback if Celery broker/backend is operating synchronously in development/test
+            try:
+                run_generation_pipeline.apply(
+                    args=[str(job.id)],
+                    kwargs={
+                        'instruction': instruction,
+                        'prompt_override': prompt_override,
+                        'num_candidates': num_candidates,
+                        'user_auth_token': user_auth_token,
+                    },
+                )
+            except Exception:
+                # Direct invocation if Celery result backend is offline in development
+                run_generation_pipeline(
+                    str(job.id),
+                    instruction=instruction,
+                    prompt_override=prompt_override,
+                    num_candidates=num_candidates,
+                    user_auth_token=user_auth_token,
+                )
 
-        # 5. Return HTTP 202 Accepted
+        # 6. Return HTTP 202 Accepted
         return Response(
             {
                 'job_id': str(job.id),

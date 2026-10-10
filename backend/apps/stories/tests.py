@@ -463,3 +463,58 @@ class StoryEngineAPITests(TestCase):
         self.assertEqual(len(res.data), 1)
         self.assertEqual(res.data[0]['content'], 'Page 1 prompt')
 
+
+class SceneExtractorUnitTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='test_scene@vizzy.local', password='pwd')
+        self.project = Project.objects.create(owner=self.user, title='Scene Test Project')
+        self.char1 = Character.objects.create(project=self.project, name='Rook', role='Pilot')
+        self.char2 = Character.objects.create(project=self.project, name='Vesper', role='Infiltrator')
+        self.env1 = Environment.objects.create(project=self.project, name='Docks', weather='Foggy')
+
+    def test_clean_json_response_with_markdown_fences(self):
+        from apps.stories.services.scene_extractor import clean_json_response
+        raw_markdown = """```json
+        {
+            "camera": "Low angle",
+            "action": "Rook leaps over crates",
+            "mood": "Urgent",
+            "lighting_override": "Neon streetlamp",
+            "character_ids": [],
+            "environment_id": null,
+            "extra_details": "Rain puddles"
+        }
+        ```"""
+        parsed = clean_json_response(raw_markdown)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed['camera'], 'Low angle')
+        self.assertEqual(parsed['action'], 'Rook leaps over crates')
+
+    def test_validate_and_normalize_scene_json(self):
+        from apps.stories.services.scene_extractor import validate_and_normalize_scene_json
+        raw = {
+            'camera': 'Wide shot',
+            'action': 'Characters regroup',
+            'character_ids': [str(self.char1.id), 'invalid-id-xyz'],
+            'environment_id': str(self.env1.id),
+        }
+        normalized = validate_and_normalize_scene_json(
+            raw,
+            valid_character_ids=[str(self.char1.id), str(self.char2.id)],
+            valid_environment_ids=[str(self.env1.id)],
+        )
+        self.assertEqual(normalized['camera'], 'Wide shot')
+        self.assertEqual(normalized['character_ids'], [str(self.char1.id)])
+        self.assertEqual(normalized['environment_id'], str(self.env1.id))
+
+    def test_rule_based_fallback_extraction(self):
+        from apps.stories.services.scene_extractor import extract_scene_json
+        scene = extract_scene_json(
+            instruction="Close up of Rook in the Docks",
+            project=self.project,
+        )
+        self.assertEqual(scene['camera'], 'Close-up')
+        self.assertIn(str(self.char1.id), scene['character_ids'])
+        self.assertEqual(scene['environment_id'], str(self.env1.id))
+
+

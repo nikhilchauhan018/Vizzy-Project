@@ -10,6 +10,8 @@ import { PreviewDrawer } from '../shared/components/PreviewDrawer';
 import { AccountModal } from '../shared/components/AccountModal';
 import { InitialCreateScreen } from '../shared/components/InitialCreateScreen';
 import { MobileDrawer } from '../shared/components/MobileDrawer';
+import { generationApi } from '../services/generationApi';
+import { puterAuth } from '../services/puterAuth';
 import { Menu, Plus } from 'lucide-react';
 
 export default function App() {
@@ -32,6 +34,30 @@ export default function App() {
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [showInitialCreate, setShowInitialCreate] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Puter AI connection state
+  const [isPuterConnected, setIsPuterConnected] = useState<boolean>(() => puterAuth.isSignedIn());
+  const [isConnectingPuter, setIsConnectingPuter] = useState(false);
+  const [puterNotice, setPuterNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsPuterConnected(puterAuth.isSignedIn());
+  }, []);
+
+  const handleConnectPuter = async () => {
+    setIsConnectingPuter(true);
+    setPuterNotice(null);
+    try {
+      await puterAuth.connectInteractive();
+      setIsPuterConnected(true);
+      setPuterNotice('Puter AI connected! Ready to generate visual candidates.');
+    } catch (err: any) {
+      console.warn('Puter connection error:', err);
+      setPuterNotice(err?.message || 'Failed to connect to Puter AI.');
+    } finally {
+      setIsConnectingPuter(false);
+    }
+  };
 
   // Active page resolution
   const projectPages = Array.isArray(activeProject?.pages) ? activeProject.pages : [];
@@ -88,27 +114,119 @@ export default function App() {
     setIsPreviewOpen(false);
   };
 
-  // 1. Send Message Flow (Persisted directly through backend API)
+  // 1. Send Message Flow (Visual Engine Image Generation)
   const handleSendMessage = async (text: string, _attachedImage?: string | null) => {
     if (!text || !text.trim()) return;
+    const cleanText = text.trim();
+
+    // Verify Puter authentication before initiating generation
+    if (!puterAuth.isSignedIn()) {
+      setIsConnectingPuter(true);
+      try {
+        setPuterNotice('Connecting to Puter AI for visual generation...');
+        await puterAuth.connectInteractive();
+        setIsPuterConnected(true);
+        setPuterNotice(null);
+      } catch (err: any) {
+        setIsConnectingPuter(false);
+        const errMsg = err?.message || 'Puter AI connection is required for image generation.';
+        setPuterNotice(errMsg);
+        await sendChatMessage(
+          `To generate images with Puter AI, please connect your Puter session first: ${errMsg}`,
+          {
+            pageId: currentPage.id,
+            sender: 'vizzy',
+            messageType: 'text',
+          }
+        ).catch(() => null);
+        return;
+      } finally {
+        setIsConnectingPuter(false);
+      }
+    }
+
     setIsGenerating(true);
+
     try {
-      await sendChatMessage(text, {
+      // 1. Persist user chat message
+      await sendChatMessage(cleanText, {
         pageId: currentPage.id,
         sender: 'user',
         messageType: 'text',
       });
-    } catch (err) {
-      console.error('Failed to persist user chat message:', err);
+
+      // 2. Trigger backend GenerationJob (Puter primary via ProviderRouter)
+      const jobRes = await generationApi.enqueueGeneration({
+        instruction: cleanText,
+        num_candidates: 3,
+      });
+
+      // 4. Poll until Celery pipeline reaches completion
+      const completedJob = await generationApi.pollJobUntilComplete(jobRes.job_id);
+
+      if (completedJob.candidates && completedJob.candidates.length > 0) {
+        const generatedCandidates: GenerationCandidate[] = completedJob.candidates.map((c, idx) => ({
+          id: c.id,
+          title: `Option ${idx + 1}`,
+          description: `Generated candidate for: "${cleanText.slice(0, 45)}..."`,
+          imageUrl: c.image_url,
+          camera: '16:9',
+          lighting: 'Cinematic',
+          aspectRatio: '16:9',
+        }));
+
+        // 5. Persist Vizzy response message with candidates
+        await sendChatMessage(
+          `I've generated ${generatedCandidates.length} visual options for this panel. Select your preferred candidate to approve or refine:`,
+          {
+            pageId: currentPage.id,
+            sender: 'vizzy',
+            messageType: 'options',
+            payload: { candidates: generatedCandidates },
+          }
+        );
+
+        // 6. Update local page state with newly generated candidates
+        const updatedPage: StoryPage = {
+          ...currentPage,
+          candidates: generatedCandidates,
+          status: 'OPTIONS_READY',
+          currentImage: currentPage.currentImage || generatedCandidates[0]?.imageUrl,
+        };
+
+        updateProject({
+          pages: projectPages.map((p) => (p.id === currentPage.id ? updatedPage : p)),
+        });
+      }
+    } catch (err: any) {
+      console.error('Generation pipeline error:', err);
+      const friendlyError = err?.message || 'Unable to generate options at this moment. Please try again.';
+      await sendChatMessage(
+        `I encountered an issue generating options: ${friendlyError}`,
+        {
+          pageId: currentPage.id,
+          sender: 'vizzy',
+          messageType: 'text',
+        }
+      ).catch(() => null);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // 2. Candidate Selection Action
-  const handleSelectCandidate = (candidateId: string) => {
+  // 2. Candidate Selection Action (Preserves Version Lineage & Updates State)
+  const handleSelectCandidate = async (candidateId: string) => {
     const candidate = currentPage.candidates?.find((c) => c.id === candidateId);
     if (!candidate) return;
+
+    // Call backend candidate selection endpoint if not a mock ID
+    if (!candidate.id.startsWith('c-')) {
+      try {
+        await generationApi.selectCandidate(candidateId);
+      } catch (err) {
+        console.warn('Backend candidate select error:', err);
+      }
+    }
 
     const updatedPage: StoryPage = {
       ...currentPage,
@@ -117,20 +235,19 @@ export default function App() {
       status: 'APPROVED',
     };
 
-    const confirmMsg: ChatMessageItem = {
-      id: `msg-${Date.now()}`,
-      sender: 'vizzy',
-      text: `Selected ${candidate.title}. You can now refine it or preview the page.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      pageId: currentPage.id,
-      type: 'approval',
-      refinedImageUrl: candidate.imageUrl,
-    };
-
     updateProject({
       pages: projectPages.map((p) => (p.id === currentPage.id ? updatedPage : p)),
-      chatHistory: [...projectChatHistory, confirmMsg],
     });
+
+    await sendChatMessage(
+      `Selected ${candidate.title}. You can now refine it in chat or proceed to the next page.`,
+      {
+        pageId: currentPage.id,
+        sender: 'vizzy',
+        messageType: 'approval',
+        payload: { refinedImageUrl: candidate.imageUrl },
+      }
+    ).catch(() => null);
   };
 
   // 3. Candidate Removal Action
@@ -312,6 +429,10 @@ export default function App() {
             isPageApproved={currentPage.status === 'APPROVED'}
             isLoading={isGenerating}
             apiError={apiError}
+            isPuterConnected={isPuterConnected}
+            onConnectPuter={handleConnectPuter}
+            isConnectingPuter={isConnectingPuter}
+            puterNotice={puterNotice}
           />
         )}
       </div>

@@ -72,7 +72,7 @@ class PuterAdapter(BaseProviderAdapter):
         token = self._resolve_auth_token(user_auth_token)
         chosen_model = model or DEFAULT_TEXT_MODEL
 
-        url = f"{PUTER_BASE_URL.rstrip('/')}/drivers/ai/chat"
+        url = f"{PUTER_BASE_URL.rstrip('/')}/drivers/call"
         headers = {
             'Authorization': f"Bearer {token}",
             'Content-Type': 'application/json',
@@ -84,9 +84,15 @@ class PuterAdapter(BaseProviderAdapter):
         messages.append({'role': 'user', 'content': prompt})
 
         payload = {
-            'model': chosen_model,
-            'messages': messages,
-            'stream': False,
+            'interface': 'puter-chat-completion',
+            'driver': 'ai-chat',
+            'method': 'complete',
+            'args': {
+                'model': chosen_model,
+                'messages': messages,
+                'stream': False,
+            },
+            'auth_token': token,
         }
 
         try:
@@ -160,16 +166,22 @@ class PuterAdapter(BaseProviderAdapter):
         token = self._resolve_auth_token(user_auth_token)
         chosen_model = model or DEFAULT_IMAGE_MODEL
 
-        url = f"{PUTER_BASE_URL.rstrip('/')}/drivers/ai/txt2img"
+        url = f"{PUTER_BASE_URL.rstrip('/')}/drivers/call"
         headers = {
             'Authorization': f"Bearer {token}",
             'Content-Type': 'application/json',
         }
 
         payload = {
-            'model': chosen_model,
-            'prompt': prompt,
-            'aspect_ratio': aspect_ratio,
+            'interface': 'puter-image-generation',
+            'driver': 'ai-image',
+            'method': 'generate',
+            'args': {
+                'model': chosen_model,
+                'prompt': prompt,
+                'aspect_ratio': aspect_ratio,
+            },
+            'auth_token': token,
         }
 
         try:
@@ -203,10 +215,30 @@ class PuterAdapter(BaseProviderAdapter):
                     status_code=res.status_code,
                 )
 
-            data = res.json()
             self.circuit_breaker.record_success()
 
-            image_url = data.get('image_url') or data.get('url') or ''
+            # Handle binary image stream
+            content_type = res.headers.get('content-type', '').split(';')[0].strip()
+            if content_type.startswith('image/'):
+                import base64
+                b64_data = base64.b64encode(res.content).decode('utf-8')
+                image_url = f"data:{content_type};base64,{b64_data}"
+                return {
+                    'provider': self.name,
+                    'model': chosen_model,
+                    'image_url': image_url,
+                    'aspect_ratio': aspect_ratio,
+                    'raw': {'content_type': content_type, 'size': len(res.content)},
+                }
+
+            data = res.json()
+            result = data.get('result') or data
+            image_url = ''
+            if isinstance(result, dict):
+                image_url = result.get('image_url') or result.get('url') or result.get('asset_url') or result.get('src') or ''
+            elif isinstance(result, str) and (result.startswith('http') or result.startswith('data:image')):
+                image_url = result
+
             return {
                 'provider': self.name,
                 'model': chosen_model,

@@ -27,7 +27,7 @@ def compile_prompt(
     if style_bible:
         prefix = getattr(style_bible, 'locked_style_prompt_prefix', '')
         if prefix and prefix.strip():
-            parts.push = parts.append(prefix.strip())
+            parts.append(prefix.strip())
 
         art_style = getattr(style_bible, 'art_style', '')
         if art_style and art_style.strip():
